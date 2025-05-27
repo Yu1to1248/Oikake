@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>滑らかに動く逃げゲー</title>
+<title>逃げゲー（敵増殖・タイマー付き）</title>
 <style>
   body {
     margin: 0;
@@ -18,7 +18,8 @@
   canvas {
     background: white;
     border: 2px solid #333;
-    touch-action: none; /* タッチ操作のブラウザ標準動作抑制 */
+    touch-action: none;
+    display: block;
   }
 </style>
 </head>
@@ -30,40 +31,44 @@
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
 
+  // プレイヤーサイズを20に変更
   const player = {
     x: 200,
     y: 200,
-    size: 30,
+    size: 20,  // ←ここを30から20に変更
     speed: 5,
     vx: 0,
     vy: 0,
   };
 
-  // 敵は3〜5体、少し小さめのサイズ
-  const enemyCount = 4;
-  const enemies = [];
+  let enemies = [];
+  const initialEnemyCount = 4;
 
-  for (let i = 0; i < enemyCount; i++) {
-    enemies.push({
-      x: Math.random() * (canvas.width - 20),
-      y: Math.random() * (canvas.height - 20),
+  function createEnemy(x, y) {
+    return {
+      x: x,
+      y: y,
       size: 20,
       vx: (Math.random() < 0.5 ? 1 : -1) * (1 + Math.random() * 1.5),
       vy: (Math.random() < 0.5 ? 1 : -1) * (1 + Math.random() * 1.5),
-    });
+      bounceCount: 0,
+    };
+  }
+
+  for (let i = 0; i < initialEnemyCount; i++) {
+    enemies.push(createEnemy(
+      Math.random() * (canvas.width - 20),
+      Math.random() * (canvas.height - 20)
+    ));
   }
 
   let gameOver = false;
-
-  // プレイヤーの移動方向フラグ（押されている方向）
-  const input = { up: false, down: false, left: false, right: false };
-
-  // タッチ・マウス位置で押している方向を決める用の座標
   let pointerX = null;
   let pointerY = null;
   let pointerActive = false;
+  let startTime = null;
+  let elapsedSeconds = 0;
 
-  // 指定の方向ベクトルを得る（正規化）
   function getDirectionVector() {
     if (!pointerActive) return { x: 0, y: 0 };
     const dx = pointerX - player.x - player.size / 2;
@@ -81,32 +86,52 @@
     player.x += player.vx;
     player.y += player.vy;
 
-    // 画面内に制限
     player.x = Math.min(Math.max(player.x, 0), canvas.width - player.size);
     player.y = Math.min(Math.max(player.y, 0), canvas.height - player.size);
   }
 
   function updateEnemies() {
+    let newEnemies = [];
     for (const e of enemies) {
       e.x += e.vx;
       e.y += e.vy;
 
-      // 壁で反射
+      let bounced = false;
       if (e.x < 0) {
         e.x = 0;
         e.vx = -e.vx;
+        bounced = true;
       } else if (e.x + e.size > canvas.width) {
         e.x = canvas.width - e.size;
         e.vx = -e.vx;
+        bounced = true;
       }
       if (e.y < 0) {
         e.y = 0;
         e.vy = -e.vy;
+        bounced = true;
       } else if (e.y + e.size > canvas.height) {
         e.y = canvas.height - e.size;
         e.vy = -e.vy;
+        bounced = true;
+      }
+
+      if (bounced) {
+        e.bounceCount++;
+        if (e.bounceCount >= 10) {
+          e.bounceCount = 0;
+          for (let i = 0; i < 2; i++) {
+            const offsetX = (Math.random() - 0.5) * 20;
+            const offsetY = (Math.random() - 0.5) * 20;
+            newEnemies.push(createEnemy(
+              Math.min(Math.max(e.x + offsetX, 0), canvas.width - 20),
+              Math.min(Math.max(e.y + offsetY, 0), canvas.height - 20)
+            ));
+          }
+        }
       }
     }
+    enemies = enemies.concat(newEnemies);
   }
 
   function checkCollision(a, b) {
@@ -123,16 +148,20 @@
     ctx.fillRect(obj.x, obj.y, obj.size, obj.size);
   }
 
+  function drawTimer() {
+    ctx.fillStyle = 'black';
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`時間: ${elapsedSeconds}s`, 10, 30);
+  }
+
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // 敵を描画
     for (const e of enemies) {
       drawRect(e, 'red');
     }
-
-    // プレイヤー描画
     drawRect(player, 'blue');
+    drawTimer();
 
     if (gameOver) {
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -144,39 +173,39 @@
     }
   }
 
-  function gameLoop() {
+  function gameLoop(timestamp) {
+    if (!startTime) startTime = timestamp;
+    elapsedSeconds = Math.floor((timestamp - startTime) / 1000);
+
     if (!gameOver) {
       updatePlayer();
       updateEnemies();
 
-      // 敵とプレイヤーの衝突チェック
       for (const e of enemies) {
         if (checkCollision(player, e)) {
           gameOver = true;
           break;
         }
       }
+    }
 
-      draw();
+    draw();
+
+    if (!gameOver) {
       requestAnimationFrame(gameLoop);
     }
   }
 
-  // タッチ / マウス操作
-
-  // 押している座標をセット
   function pointerDown(x, y) {
     pointerX = x;
     pointerY = y;
     pointerActive = true;
   }
-  // 指を離すと停止
   function pointerUp() {
     pointerActive = false;
     pointerX = null;
     pointerY = null;
   }
-  // 動かしたら座標更新
   function pointerMove(x, y) {
     if (pointerActive) {
       pointerX = x;
@@ -184,43 +213,36 @@
     }
   }
 
-  // マウス対応
-  canvas.addEventListener('mousedown', (e) => {
-    pointerDown(e.offsetX, e.offsetY);
-  });
-  canvas.addEventListener('mouseup', (e) => {
-    pointerUp();
-  });
-  canvas.addEventListener('mouseleave', (e) => {
-    pointerUp();
-  });
-  canvas.addEventListener('mousemove', (e) => {
-    pointerMove(e.offsetX, e.offsetY);
-  });
+  canvas.addEventListener('mousedown', e => pointerDown(e.offsetX, e.offsetY));
+  canvas.addEventListener('mouseup', e => pointerUp());
+  canvas.addEventListener('mouseleave', e => pointerUp());
+  canvas.addEventListener('mousemove', e => pointerMove(e.offsetX, e.offsetY));
 
-  // タッチ対応
-  canvas.addEventListener('touchstart', (e) => {
+  canvas.addEventListener('touchstart', e => {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches[0];
     pointerDown(touch.clientX - rect.left, touch.clientY - rect.top);
   }, { passive: false });
-  canvas.addEventListener('touchend', (e) => {
+
+  canvas.addEventListener('touchend', e => {
     e.preventDefault();
     pointerUp();
   }, { passive: false });
-  canvas.addEventListener('touchcancel', (e) => {
+
+  canvas.addEventListener('touchcancel', e => {
     e.preventDefault();
     pointerUp();
   }, { passive: false });
-  canvas.addEventListener('touchmove', (e) => {
+
+  canvas.addEventListener('touchmove', e => {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches[0];
     pointerMove(touch.clientX - rect.left, touch.clientY - rect.top);
   }, { passive: false });
 
-  gameLoop();
+  requestAnimationFrame(gameLoop);
 </script>
 
 </body>
